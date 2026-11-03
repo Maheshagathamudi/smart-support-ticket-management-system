@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "alembic*"]
+
+[project]
+name = "smart-support-ticket-management-system"
+version = "0.1.0"
+description = "Secure support ticket management API"
+requires-python = ">=3.12"
+dependencies = ["fastapi==0.115.12", "uvicorn[standard]==0.34.2", "pydantic-settings==2.9.1", "sqlalchemy==2.0.41", "psycopg[binary]==3.2.13", "alembic==1.16.1", "PyJWT==2.10.1", "pwdlib[argon2]==0.2.1", "celery[redis]==5.5.3", "email-validator==2.2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.0", "httpx==0.28.1", "ruff==0.11.13"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
