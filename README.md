@@ -42,6 +42,12 @@ docker compose up --build
 
 Open <http://127.0.0.1:8000/> or <http://127.0.0.1:8000/docs>. Stop with **Ctrl+C**. `docker compose down` removes the containers while preserving the named database volume.
 
+## Deploy a free portfolio demo
+
+The included `render.yaml` configures a free Render Docker web service. Create a free PostgreSQL project on Neon, then create a Render Blueprint from this GitHub repository and provide the Neon connection URL when prompted for `DATABASE_URL`. Use the pooled connection URL and change its prefix from `postgresql://` to `postgresql+psycopg://`. Render generates `SECRET_KEY`; the Docker startup runs Alembic migrations before starting the app.
+
+Render's free web service sleeps after 15 minutes without traffic and can take about a minute to wake. This Blueprint does not run the Celery worker or scheduler, so scheduled SLA breach checks are not active in this free deployment. The database is stored on Neon, not Render's temporary filesystem.
+
 ## Create the first administrator
 
 Public signup creates customers. From another PowerShell window in the project directory, create an admin account; the password prompt is hidden:
