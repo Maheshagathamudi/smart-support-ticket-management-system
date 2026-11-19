@@ -8,6 +8,8 @@ A portfolio support desk built with FastAPI, SQLAlchemy, PostgreSQL, JWT authent
 - Agent access to assigned tickets, customer replies, and status updates.
 - Admin reports, agent creation and activation controls, and ticket assignment.
 - Ticket status, priority, history, notifications, and recorded SLA breaches.
+- Basic IP-based rate limits on customer registration and sign-in.
+- Optional email verification for customer accounts when SMTP is configured.
 - Browser frontend, interactive API reference, and role-based API access.
 - Docker Compose services for PostgreSQL, Redis, API, worker, and scheduler.
 
@@ -58,6 +60,17 @@ Public signup creates customers. From another PowerShell window in the project d
 
 For Docker, use `docker compose exec api python scripts/create_admin.py`. Sign in to the app home page with that admin email and password. Admins can see the **Reports** and **Team** sections.
 
+## Enable customer email verification
+
+Email verification is optional and off by default. To enable it, configure these environment variables in Render (or your local `.env`):
+
+- `EMAIL_VERIFICATION_REQUIRED=true`
+- `PUBLIC_BASE_URL=https://your-render-service.onrender.com`
+- `SMTP_HOST`, `SMTP_PORT` (usually `587`), `SMTP_USERNAME`, `SMTP_PASSWORD`, and `EMAIL_FROM`
+- `EMAIL_VERIFICATION_MINUTES=30` (optional)
+
+After setting these values, redeploy. New customer accounts must verify using the emailed link before signing in. Existing accounts and admin-created agent accounts remain verified. Email delivery requires a working SMTP provider; if SMTP is unavailable, signup returns an error instead of creating an unverified account.
+
 ## API overview
 
 Routes use the `/api/v1` prefix. Register with `POST /api/v1/auth/register`; sign in with `POST /api/v1/auth/login` using form fields `username` (email) and `password`. Send the returned bearer token in the `Authorization` header.
@@ -82,6 +95,6 @@ GitHub Actions runs tests and Ruff on pushes and pull requests.
 
 ## Scope and production readiness
 
-This is a portfolio MVP, not a production-hardened support platform. It does not send email, verify email addresses, rate-limit registration or sign-in, or provide first-response SLA tracking. The SLA task records resolution-time breaches for high and critical tickets. Local SQLite does not run background jobs.
+This is a portfolio MVP, not a production-hardened support platform. Email verification can be enabled, but general ticket email notifications and first-response SLA tracking are not implemented. Registration is limited to 5 requests per IP per hour, and sign-in to 10 requests per IP per minute. Rate-limit counters use in-memory storage, so they reset when the service restarts and are not shared across multiple instances; configure shared Redis storage before scaling or relying on this as a production abuse-control measure. The SLA task records resolution-time breaches for high and critical tickets. Local SQLite does not run background jobs.
 
-Before deploying for real use, configure production credentials and secrets, TLS, backups, monitoring, and access controls. Add abuse protection, broader integration coverage, and operational alerting for the intended environment.
+Before deploying for real use, configure production credentials and secrets, TLS, backups, monitoring, and access controls. Harden abuse protection with shared storage, add broader integration coverage, and configure operational alerting for the intended environment.

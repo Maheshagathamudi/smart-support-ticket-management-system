@@ -1,12 +1,18 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.security import OAuth2PasswordRequestForm
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
+import smtplib
 from app.core.config import settings
 from app.core.security import hash_password, verify_password, create_access_token
 from app.db.session import Base, engine, get_db
@@ -30,6 +36,7 @@ from app.schemas.api import (
     CommentOut,
 )
 from app.api.deps import current_user, require_admin
+from app.services.email import send_verification_email
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,7 +52,10 @@ async def lifespan(app: FastAPI):
     yield
 
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/assets", StaticFiles(directory=frontend_dir), name="assets")
 
@@ -60,23 +70,72 @@ def health():
 
 
 @app.post("/api/v1/auth/register", response_model=UserOut, status_code=201)
-def register(payload: RegisterIn, db: Session = Depends(get_db)):
+@limiter.limit("5/hour")
+def register(request: Request, payload: RegisterIn, db: Session = Depends(get_db)):
     if db.scalar(select(User).where(User.email == payload.email)):
         raise HTTPException(409, "Email already registered")
+    token = secrets.token_urlsafe(32) if settings.email_verification_required else None
+    expires_at = (
+        datetime.now(timezone.utc)
+        + timedelta(minutes=settings.email_verification_minutes)
+        if token
+        else None
+    )
     user = User(
         email=payload.email,
         full_name=payload.full_name,
         password_hash=hash_password(payload.password),
         role=Role.CUSTOMER,
+        is_email_verified=not settings.email_verification_required,
+        email_verification_token_hash=hashlib.sha256(token.encode()).hexdigest()
+        if token
+        else None,
+        email_verification_expires_at=expires_at,
     )
     db.add(user)
+    if token:
+        try:
+            send_verification_email(user.email, user.full_name, token)
+        except (OSError, RuntimeError, smtplib.SMTPException) as exc:
+            db.rollback()
+            raise HTTPException(
+                503, "Email verification is temporarily unavailable"
+            ) from exc
     db.commit()
     db.refresh(user)
     return user
 
 
+@app.post("/api/v1/auth/verify-email")
+def verify_email(token: str, db: Session = Depends(get_db)):
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    user = db.scalar(
+        select(User).where(User.email_verification_token_hash == token_hash)
+    )
+    if not user or not user.email_verification_expires_at:
+        raise HTTPException(400, "Verification link is invalid or expired")
+    expires_at = user.email_verification_expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        user.email_verification_token_hash = None
+        user.email_verification_expires_at = None
+        db.commit()
+        raise HTTPException(400, "Verification link is invalid or expired")
+    user.is_email_verified = True
+    user.email_verification_token_hash = None
+    user.email_verification_expires_at = None
+    db.commit()
+    return {"message": "Email verified. You can now sign in."}
+
+
 @app.post("/api/v1/auth/login", response_model=TokenOut)
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(
+    request: Request,
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
     user = db.scalar(select(User).where(User.email == form.username))
     if (
         not user
@@ -84,6 +143,8 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
         or not verify_password(form.password, user.password_hash)
     ):
         raise HTTPException(401, "Incorrect email or password")
+    if not user.is_email_verified:
+        raise HTTPException(403, "Verify your email before signing in")
     return TokenOut(access_token=create_access_token(str(user.id)))
 
 

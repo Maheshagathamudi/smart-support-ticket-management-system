@@ -14,6 +14,7 @@ class UserOut(BaseModel):
     full_name: str
     role: Role
     is_active: bool
+    is_email_verified: bool = True
 
 
 class TokenOut(BaseModel):

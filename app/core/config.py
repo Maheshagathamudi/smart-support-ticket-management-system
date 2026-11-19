@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     email_from: str = "no-reply@example.test"
+    email_verification_required: bool = False
+    public_base_url: str = "http://127.0.0.1:8000"
+    email_verification_minutes: int = 30
 
 
 settings = Settings()
